@@ -1,6 +1,7 @@
 import express from 'express'
 import multer from 'multer'
-import { uploadDocument, analyzeDocument, getAnalysisResults } from '../controllers/uploadController.js'
+import { uploadDocument, analyzeDocument, getAnalysisResults, getUserReports } from '../controllers/uploadController.js'
+import { optionalAuth } from '../middleware/auth.js'
 
 const router = express.Router()
 
@@ -22,10 +23,11 @@ const upload = multer({
   }
 })
 
-// Upload Routes
-router.post('/document', upload.single('document'), uploadDocument)
-router.post('/analyze/:sessionId', analyzeDocument)
-router.get('/results/:sessionId', getAnalysisResults)
+// Upload Routes (all require user context - guest or authenticated)
+router.post('/document', optionalAuth, upload.single('document'), uploadDocument)
+router.post('/analyze/:reportId', optionalAuth, analyzeDocument)
+router.get('/results/:reportId', optionalAuth, getAnalysisResults)
+router.get('/reports', optionalAuth, getUserReports)
 
 // Test route
 router.get('/test', (req, res) => {

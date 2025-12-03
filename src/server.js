@@ -7,6 +7,7 @@ import dotenv from 'dotenv'
 
 // Import routes
 import uploadRoutes from './routes/uploadRoutes.js'
+import authRoutes from './routes/authRoutes.js'
 
 // Load environment variables
 dotenv.config()
@@ -49,6 +50,7 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/upload', uploadRoutes)
+app.use('/api/auth', authRoutes)
 
 // 404 handler
 app.use('*', (req, res) => {

@@ -1,9 +1,13 @@
-import { v4 as uuidv4 } from 'uuid'
 import { extractTextFromDocument } from '../services/ocrService.js'
 import { analyzeTrafficViolation } from '../services/aiService.js'
-
-// In-memory storage for PoC (replace with database later)
-const sessions = new Map()
+import { 
+  createReport, 
+  updateReportOCR, 
+  updateReportAnalysis, 
+  getReportById,
+  verifyReportOwnership,
+  updateReportStatus 
+} from '../services/reportsService.js'
 
 export const uploadDocument = async (req, res) => {
   try {
@@ -14,8 +18,8 @@ export const uploadDocument = async (req, res) => {
       })
     }
 
-    // Generate session ID
-    const sessionId = uuidv4()
+    // Get user from middleware (guest or authenticated user)
+    const userId = req.user.id
     
     // Store file info
     const fileInfo = {
@@ -26,32 +30,56 @@ export const uploadDocument = async (req, res) => {
       uploadedAt: new Date().toISOString()
     }
 
-    console.log(`📄 Document uploaded: ${req.file.originalname} (${req.file.size} bytes)`)
+    console.log(`📄 Document uploaded by user ${userId}: ${req.file.originalname} (${req.file.size} bytes)`)
 
-    // Process OCR immediately upon upload
-    const ocrResults = await extractTextFromDocument(fileInfo)
+    // Create report in database
+    const createResult = await createReport(userId, fileInfo)
+    if (!createResult.success) {
+      console.error('❌ Database error creating report:', createResult.error)
+      console.error('User ID:', userId)
+      console.error('File info:', fileInfo)
+      return res.status(500).json({
+        error: 'Database error',
+        message: createResult.error
+      })
+    }
 
-    // Initialize session with OCR results
-    sessions.set(sessionId, {
-      sessionId,
-      file: fileInfo,
-      status: 'ocr_complete',
-      ocrResults,
-      analysisResults: null,
-      createdAt: new Date().toISOString()
-    })
+    const report = createResult.report
 
-    res.status(200).json({
-      success: true,
-      sessionId,
-      file: {
-        name: req.file.originalname,
-        size: req.file.size,
-        type: req.file.mimetype
-      },
-      ocrResults,
-      message: 'Document uploaded and OCR processed successfully'
-    })
+    try {
+      // Process OCR immediately upon upload
+      const ocrResults = await extractTextFromDocument(fileInfo)
+
+      // Update report with OCR results
+      const ocrUpdateResult = await updateReportOCR(report.id, ocrResults)
+      if (!ocrUpdateResult.success) {
+        console.error('Failed to update OCR results:', ocrUpdateResult.error)
+      }
+
+      res.status(200).json({
+        success: true,
+        reportId: report.id,
+        file: {
+          name: req.file.originalname,
+          size: req.file.size,
+          type: req.file.mimetype
+        },
+        ocrResults,
+        message: 'Document uploaded and OCR processed successfully'
+      })
+
+    } catch (ocrError) {
+      console.error('OCR processing error:', ocrError)
+      
+      // Update report status to error
+      await updateReportStatus(report.id, 'error', ocrError.message)
+      
+      res.status(500).json({
+        error: 'OCR processing failed',
+        message: ocrError.message,
+        reportId: report.id
+      })
+    }
 
   } catch (error) {
     console.error('Upload error:', error)
@@ -64,55 +92,71 @@ export const uploadDocument = async (req, res) => {
 
 export const analyzeDocument = async (req, res) => {
   try {
-    const { sessionId } = req.params
+    const { reportId } = req.params
+    const userId = req.user.id
     
-    if (!sessions.has(sessionId)) {
+    // Get report from database
+    const reportResult = await getReportById(reportId)
+    if (!reportResult.success) {
       return res.status(404).json({
-        error: 'Session not found',
-        message: 'Invalid session ID'
+        error: 'Report not found',
+        message: 'Invalid report ID'
       })
     }
 
-    const session = sessions.get(sessionId)
+    const report = reportResult.report
+
+    // Verify ownership (unless it's guest user)
+    if (userId !== report.user_id) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'You can only analyze your own reports'
+      })
+    }
     
     // Check if OCR was completed
-    if (!session.ocrResults) {
+    if (!report.ocr_results) {
       return res.status(400).json({
         error: 'OCR not completed',
         message: 'Document must be processed first'
       })
     }
 
-    // Update status
-    session.status = 'ai_processing'
-    sessions.set(sessionId, session)
+    // Update status to processing
+    await updateReportStatus(reportId, 'ai_processing')
 
-    // AI Analysis using existing OCR results
-    const analysisResults = await analyzeTrafficViolation(session.ocrResults)
-    session.analysisResults = analysisResults
-    session.status = 'complete'
-    session.completedAt = new Date().toISOString()
-    sessions.set(sessionId, session)
+    try {
+      // AI Analysis using existing OCR results
+      const analysisResults = await analyzeTrafficViolation(report.ocr_results)
+      
+      // Update report with analysis results
+      const analysisUpdateResult = await updateReportAnalysis(reportId, analysisResults)
+      if (!analysisUpdateResult.success) {
+        console.error('Failed to update analysis results:', analysisUpdateResult.error)
+      }
 
-    res.status(200).json({
-      success: true,
-      sessionId,
-      status: 'complete',
-      analysisResults,
-      message: 'AI analysis completed successfully'
-    })
+      res.status(200).json({
+        success: true,
+        reportId,
+        status: 'complete',
+        analysisResults,
+        message: 'AI analysis completed successfully'
+      })
+
+    } catch (analysisError) {
+      console.error('AI analysis error:', analysisError)
+      
+      // Update report status to error
+      await updateReportStatus(reportId, 'error', analysisError.message)
+      
+      res.status(500).json({
+        error: 'Analysis failed',
+        message: analysisError.message
+      })
+    }
 
   } catch (error) {
     console.error('Analysis error:', error)
-    
-    // Update session status
-    if (sessions.has(req.params.sessionId)) {
-      const session = sessions.get(req.params.sessionId)
-      session.status = 'error'
-      session.error = error.message
-      sessions.set(req.params.sessionId, session)
-    }
-
     res.status(500).json({
       error: 'Analysis failed',
       message: error.message
@@ -122,31 +166,75 @@ export const analyzeDocument = async (req, res) => {
 
 export const getAnalysisResults = async (req, res) => {
   try {
-    const { sessionId } = req.params
+    const { reportId } = req.params
+    const userId = req.user.id
     
-    if (!sessions.has(sessionId)) {
+    // Get report from database
+    const reportResult = await getReportById(reportId)
+    if (!reportResult.success) {
       return res.status(404).json({
-        error: 'Session not found',
-        message: 'Invalid session ID'
+        error: 'Report not found',
+        message: 'Invalid report ID'
       })
     }
 
-    const session = sessions.get(sessionId)
+    const report = reportResult.report
+
+    // Verify ownership
+    if (userId !== report.user_id) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'You can only view your own reports'
+      })
+    }
 
     res.status(200).json({
       success: true,
-      sessionId,
-      status: session.status,
-      ocrResults: session.ocrResults,
-      analysisResults: session.analysisResults,
-      createdAt: session.createdAt,
-      completedAt: session.completedAt
+      reportId: report.id,
+      status: report.status,
+      ocrResults: report.ocr_results,
+      analysisResults: report.analysis_results,
+      createdAt: report.created_at,
+      completedAt: report.completed_at,
+      originalFile: report.original_file
     })
 
   } catch (error) {
     console.error('Get results error:', error)
     res.status(500).json({
       error: 'Failed to get results',
+      message: error.message
+    })
+  }
+}
+
+// New function to get user's reports list
+export const getUserReports = async (req, res) => {
+  try {
+    const userId = req.user.id
+    const { limit = 50, offset = 0 } = req.query
+
+    const reportsResult = await getReportsByUserId(userId, parseInt(limit), parseInt(offset))
+    if (!reportsResult.success) {
+      return res.status(500).json({
+        error: 'Database error',
+        message: reportsResult.error
+      })
+    }
+
+    res.status(200).json({
+      success: true,
+      reports: reportsResult.reports,
+      pagination: {
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      }
+    })
+
+  } catch (error) {
+    console.error('Get user reports error:', error)
+    res.status(500).json({
+      error: 'Failed to get reports',
       message: error.message
     })
   }
