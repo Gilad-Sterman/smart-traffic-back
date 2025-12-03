@@ -1,12 +1,12 @@
 import { extractTextFromDocument } from '../services/ocrService.js'
 import { analyzeTrafficViolation } from '../services/aiService.js'
-import { 
-  createReport, 
-  updateReportOCR, 
-  updateReportAnalysis, 
+import {
+  createReport,
+  updateReportOCR,
+  updateReportAnalysis,
   getReportById,
   verifyReportOwnership,
-  updateReportStatus 
+  updateReportStatus
 } from '../services/reportsService.js'
 
 export const uploadDocument = async (req, res) => {
@@ -20,7 +20,7 @@ export const uploadDocument = async (req, res) => {
 
     // Get user from middleware (guest or authenticated user)
     const userId = req.user.id
-    
+
     // Store file info
     const fileInfo = {
       originalName: req.file.originalname,
@@ -49,7 +49,6 @@ export const uploadDocument = async (req, res) => {
     try {
       // Process OCR immediately upon upload
       const ocrResults = await extractTextFromDocument(fileInfo)
-
       // Update report with OCR results
       const ocrUpdateResult = await updateReportOCR(report.id, ocrResults)
       if (!ocrUpdateResult.success) {
@@ -70,10 +69,10 @@ export const uploadDocument = async (req, res) => {
 
     } catch (ocrError) {
       console.error('OCR processing error:', ocrError)
-      
+
       // Update report status to error
       await updateReportStatus(report.id, 'error', ocrError.message)
-      
+
       res.status(500).json({
         error: 'OCR processing failed',
         message: ocrError.message,
@@ -94,7 +93,7 @@ export const analyzeDocument = async (req, res) => {
   try {
     const { reportId } = req.params
     const userId = req.user.id
-    
+
     // Get report from database
     const reportResult = await getReportById(reportId)
     if (!reportResult.success) {
@@ -113,7 +112,7 @@ export const analyzeDocument = async (req, res) => {
         message: 'You can only analyze your own reports'
       })
     }
-    
+
     // Check if OCR was completed
     if (!report.ocr_results) {
       return res.status(400).json({
@@ -128,7 +127,7 @@ export const analyzeDocument = async (req, res) => {
     try {
       // AI Analysis using existing OCR results
       const analysisResults = await analyzeTrafficViolation(report.ocr_results)
-      
+
       // Update report with analysis results
       const analysisUpdateResult = await updateReportAnalysis(reportId, analysisResults)
       if (!analysisUpdateResult.success) {
@@ -145,10 +144,10 @@ export const analyzeDocument = async (req, res) => {
 
     } catch (analysisError) {
       console.error('AI analysis error:', analysisError)
-      
+
       // Update report status to error
       await updateReportStatus(reportId, 'error', analysisError.message)
-      
+
       res.status(500).json({
         error: 'Analysis failed',
         message: analysisError.message
@@ -168,7 +167,7 @@ export const getAnalysisResults = async (req, res) => {
   try {
     const { reportId } = req.params
     const userId = req.user.id
-    
+
     // Get report from database
     const reportResult = await getReportById(reportId)
     if (!reportResult.success) {

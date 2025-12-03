@@ -1,76 +1,144 @@
-// OCR Service - For PoC, we'll simulate OCR results
-// In production, integrate with Tesseract.js, Google Vision API, or Azure OCR
+// ocrService.js
+import vision from '@google-cloud/vision'
 
-export const extractTextFromDocument = async (fileInfo) => {
-  
-  // Simulate OCR processing time
-  await new Promise(resolve => setTimeout(resolve, 2000))
-  
-  // Mock OCR results based on file type
-  const mockResults = {
-    extractedText: `
-      דוח תנועה מספר: 123456789
-      תאריך עבירה: 15/11/2024
-      שעה: 14:30
-      מיקום: רחוב הרצל 45, תל אביב
-      סוג עבירה: עבירת מהירות
-      מהירות נמדדה: 65 קמ"ש
-      מהירות מותרת: 50 קמ"ש
-      סעיף חוק: 68א
-      סכום קנס: 1,000 ₪
-      נקודות: 6
-      רישיון נהיגה: 12345678
-      שם הנהג: ישראל ישראלי
-    `,
-    
-    extractedFields: {
-      reportNumber: '123456789',
-      violationDate: '15/11/2024',
-      violationTime: '14:30',
-      location: 'רחוב הרצל 45, תל אביב',
-      violationType: 'עבירת מהירות',
-      measuredSpeed: '65',
-      speedLimit: '50',
-      legalSection: '68א',
-      fineAmount: '1000',
-      points: '6',
-      licenseNumber: '12345678',
-      driverName: 'ישראל ישראלי'
-    },
-    
-    confidenceScores: {
-      reportNumber: 0.95,
-      violationDate: 0.88,
-      violationTime: 0.92,
-      location: 0.85,
-      violationType: 0.90,
-      measuredSpeed: 0.93,
-      speedLimit: 0.96,
-      legalSection: 0.87,
-      fineAmount: 0.94,
-      points: 0.91,
-      licenseNumber: 0.89,
-      driverName: 0.82
-    },
-    
-    processingInfo: {
-      fileType: fileInfo.mimetype,
-      fileSize: fileInfo.size,
-      processingTime: '2.1s',
-      ocrEngine: 'Mock OCR v1.0',
-      language: 'Hebrew',
-      processedAt: new Date().toISOString()
+// Create client
+const client = new vision.ImageAnnotatorClient()
+
+// Helper function: parse text and extract fields with confidence
+function parseOCRTextWithConfidence(text, ocrResponse) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+  const fields = {}
+  const confidences = {}
+
+  // Flatten all symbols for approximate confidence per line
+  const symbols = ocrResponse?.fullTextAnnotation?.pages.flatMap(p =>
+    p.blocks.flatMap(b =>
+      b.paragraphs.flatMap(par =>
+        par.words.flatMap(w =>
+          w.symbols.map(s => s)
+        )
+      )
+    )
+  ) || []
+
+  function getLineConfidence(line) {
+    const matchingSymbols = symbols.filter(s => line.includes(s.text))
+    if (matchingSymbols.length === 0) return 0
+    return matchingSymbols.reduce((sum, s) => sum + (s.confidence || 0), 0) / matchingSymbols.length
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const nextLine = lines[i + 1] || ''
+    const lineConfidence = getLineConfidence(line)
+
+    // Report Number
+    if (/מספר דוח|פרטי דוח מספר/i.test(line)) {
+      const match = line.match(/\d{6,}/) || nextLine.match(/\d{6,}/)
+      if (match) {
+        fields.reportNumber = match[0]
+        confidences.reportNumber = lineConfidence
+      }
+    }
+
+    // Violation Date and Time
+    if (/תאריך עבירה/i.test(line)) {
+      const match = line.match(/(\d{2}\/\d{2}\/\d{4})/)
+      const timeMatch = line.match(/(\d{2}:\d{2})/)
+      if (match) {
+        fields.violationDate = match[1]
+        confidences.violationDate = lineConfidence
+      }
+      if (timeMatch) {
+        fields.violationTime = timeMatch[1]
+        confidences.violationTime = lineConfidence
+      }
+    }
+
+    // Location
+    if (/רחוב/i.test(line) || /מיקום/i.test(line)) {
+      const loc = line.replace(/רחוב:|מיקום יחסי:/i, '').trim() + (nextLine && !nextLine.match(/\d{2}\/\d{2}\/\d{4}/) ? ' ' + nextLine : '')
+      fields.location = loc.trim()
+      confidences.location = lineConfidence
+    }
+
+    // Violation Type / Legal Section
+    if (/סעיף העבירה/i.test(line) || /מס' עבירה/i.test(line)) {
+      const match = line.match(/(\d+\s*\(?.*?\)?)/)
+      if (match) {
+        fields.violationType = match[1].trim()
+        confidences.violationType = lineConfidence
+      }
+    }
+
+    // Fine Amount
+    if (/סכום לתשלום/i.test(line)) {
+      const match = line.match(/(\d+)/)
+      if (match) {
+        fields.fineAmount = match[1]
+        confidences.fineAmount = lineConfidence
+      }
+    }
+
+    // Driver Name
+    if (/אל הנהג/i.test(line)) {
+      fields.driverName = line.replace('אל הנהג', '').trim()
+      confidences.driverName = lineConfidence
+    }
+
+    // License Number
+    if (/מספר רישוי/i.test(line)) {
+      fields.licenseNumber = nextLine || ''
+      confidences.licenseNumber = lineConfidence
+    }
+
+    // Points (if present)
+    if (/נקודות/i.test(line)) {
+      const match = line.match(/(\d+)/)
+      if (match) {
+        fields.points = match[1]
+        confidences.points = lineConfidence
+      }
     }
   }
-  
-  return mockResults
+
+  return { extractedFields: fields, confidenceScores: confidences }
 }
+
+
+// Main function
+export async function extractTextFromDocument(fileInfo) {
+  const { buffer, originalName, mimetype } = fileInfo
+
+  // Call Google Vision API
+  const [result] = await client.documentTextDetection({ image: { content: buffer } })
+  const extractedText = result.fullTextAnnotation?.text || ''
+
+  // Parse text and get structured fields with confidence
+  const { extractedFields, confidenceScores } = parseOCRTextWithConfidence(extractedText, result)
+
+  // Return structured OCR results
+  return {
+    extractedText,
+    extractedFields,
+    confidenceScores,
+    processingInfo: {
+      fileType: mimetype,
+      fileSize: buffer.length,
+      processedAt: new Date().toISOString(),
+      ocrEngine: 'Google Vision',
+      isPDF: false
+    }
+  }
+}
+
+
 
 // Helper function to validate extracted fields
 export const validateExtractedFields = (fields) => {
   const required = ['reportNumber', 'violationDate', 'violationType', 'fineAmount']
   const missing = required.filter(field => !fields[field])
-  
+
   return {
     isValid: missing.length === 0,
     missingFields: missing,

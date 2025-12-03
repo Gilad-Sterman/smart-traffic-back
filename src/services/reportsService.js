@@ -11,17 +11,6 @@ export const createReport = async (userId, fileInfo) => {
   try {
     const reportId = uuidv4()
     
-    console.log('🔄 Creating report with data:', {
-      id: reportId,
-      user_id: userId,
-      status: 'uploaded',
-      original_file: {
-        filename: fileInfo.originalName,
-        size: fileInfo.size,
-        mimetype: fileInfo.mimetype,
-        uploaded_at: fileInfo.uploadedAt
-      }
-    })
     
     const { data: report, error } = await supabase
       .from('reports')
