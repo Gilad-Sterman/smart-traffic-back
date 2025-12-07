@@ -1,8 +1,36 @@
 // ocrService.js
 import vision from '@google-cloud/vision'
+import dotenv from 'dotenv'
 
-// Create client
-const client = new vision.ImageAnnotatorClient()
+// Load environment variables (same as supabase.js does)
+dotenv.config()
+
+// Create client with credentials from environment variable
+let client
+try {  
+  if (process.env.GOOGLE_CLOUD_CREDENTIALS) {
+    // Use JSON credentials from environment variable (for production)
+    const credentials = JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS)
+    console.log('✅ Successfully parsed credentials JSON')
+    client = new vision.ImageAnnotatorClient({ credentials })
+  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS && !process.env.GOOGLE_APPLICATION_CREDENTIALS.startsWith('{')) {
+    // Use file path (for development) - only if it doesn't start with '{'
+    console.log('📁 Using GOOGLE_APPLICATION_CREDENTIALS file path for Vision API')
+    client = new vision.ImageAnnotatorClient()
+  } else {
+    // Fallback to default authentication
+    console.log('⚠️ Using default Google Cloud authentication for Vision API')
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      console.log('GOOGLE_APPLICATION_CREDENTIALS starts with {:', process.env.GOOGLE_APPLICATION_CREDENTIALS.startsWith('{'))
+    }
+    client = new vision.ImageAnnotatorClient()
+  }
+} catch (error) {
+  console.error('❌ Error initializing Google Vision client:', error)
+  // Fallback to default authentication
+  console.log('🔄 Falling back to default authentication')
+  client = new vision.ImageAnnotatorClient()
+}
 
 // Helper function: parse text and extract fields with confidence
 function parseOCRTextWithConfidence(text, ocrResponse) {

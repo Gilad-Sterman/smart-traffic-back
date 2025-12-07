@@ -4,6 +4,8 @@ import helmet from 'helmet'
 import morgan from 'morgan'
 import rateLimit from 'express-rate-limit'
 import dotenv from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 // Import routes
 import uploadRoutes from './routes/uploadRoutes.js'
@@ -11,6 +13,10 @@ import authRoutes from './routes/authRoutes.js'
 
 // Load environment variables
 dotenv.config()
+
+// Get __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 const app = express()
 const PORT = process.env.PORT || 5000
@@ -52,10 +58,28 @@ app.get('/health', (req, res) => {
 app.use('/api/upload', uploadRoutes)
 app.use('/api/auth', authRoutes)
 
-// 404 handler
-app.use('*', (req, res) => {
+// Serve static files from the public directory (frontend build)
+app.use(express.static(path.join(__dirname, '../public')))
+
+// Serve React app for all non-API routes (SPA fallback)
+app.get('*', (req, res) => {
+  // Skip API routes
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({
+      error: 'API route not found',
+      message: `Cannot ${req.method} ${req.originalUrl}`
+    })
+  }
+  
+  // Serve the React app
+  res.sendFile(path.join(__dirname, '../public/index.html'))
+})
+
+// This 404 handler should not be reached due to the catch-all above
+// But keeping it as a safety net for any edge cases
+app.use('/api/*', (req, res) => {
   res.status(404).json({
-    error: 'Route not found',
+    error: 'API route not found',
     message: `Cannot ${req.method} ${req.originalUrl}`
   })
 })
