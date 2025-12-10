@@ -93,6 +93,9 @@ export const analyzeDocument = async (req, res) => {
   try {
     const { reportId } = req.params
     const userId = req.user.id
+    
+    // Get user-corrected fields from request body (if provided)
+    const { correctedFields } = req.body || {}
 
     // Get report from database
     const reportResult = await getReportById(reportId)
@@ -125,8 +128,37 @@ export const analyzeDocument = async (req, res) => {
     await updateReportStatus(reportId, 'ai_processing')
 
     try {
-      // AI Analysis using existing OCR results
-      const analysisResults = await analyzeTrafficViolation(report.ocr_results)
+      // Prepare data for AI analysis
+      let analysisData = { ...report.ocr_results }
+      
+      // Use user-corrected fields if provided, otherwise use original OCR results
+      if (correctedFields) {
+        console.log('📝 AI analysis using user-corrected fields')
+        analysisData.extractedFields = { 
+          ...analysisData.extractedFields, 
+          ...correctedFields 
+        }
+        
+        // Update confidence scores for corrected fields (set to high confidence)
+        Object.keys(correctedFields).forEach(fieldName => {
+          if (correctedFields[fieldName] && correctedFields[fieldName].trim()) {
+            analysisData.confidenceScores[fieldName] = 0.95 // High confidence for user-corrected data
+          }
+        })
+        
+        // Update validation completeness
+        if (analysisData.validation) {
+          const requiredFields = ['reportNumber', 'violationDate', 'violationType', 'fineAmount']
+          const correctedRequiredFields = requiredFields.filter(field => 
+            analysisData.extractedFields[field] && analysisData.extractedFields[field].toString().trim()
+          )
+          analysisData.validation.completeness = (correctedRequiredFields.length / requiredFields.length) * 100
+          analysisData.validation.isValid = correctedRequiredFields.length === requiredFields.length
+        }
+      }
+
+      // AI Analysis using corrected or original OCR results
+      const analysisResults = await analyzeTrafficViolation(analysisData)
 
       // Update report with analysis results
       const analysisUpdateResult = await updateReportAnalysis(reportId, analysisResults)

@@ -41,4 +41,3 @@ export const AUTH_CONFIG = {
 }
 
 console.log(`🔐 Auth mode: ${AUTH_CONFIG.requireAuth ? 'ENABLED' : 'DISABLED (PoC mode)'}`)
-console.log(`💾 Storage mode: ${AUTH_CONFIG.fallbackMode ? 'IN-MEMORY (Fallback)' : 'SUPABASE'}`)

@@ -11,6 +11,9 @@ import { fileURLToPath } from 'url'
 import uploadRoutes from './routes/uploadRoutes.js'
 import authRoutes from './routes/authRoutes.js'
 
+// Import startup service
+import { runStartupTests } from './services/startupService.js'
+
 // Load environment variables
 dotenv.config()
 
@@ -94,10 +97,13 @@ app.use((err, req, res, next) => {
 })
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 SmartTraffic Backend running on port ${PORT}`)
   console.log(`📊 Health check: http://localhost:${PORT}/health`)
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`)
+  
+  // Test external connections
+  await runStartupTests()
 })
 
 export default app
