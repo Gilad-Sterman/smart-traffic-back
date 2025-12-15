@@ -170,17 +170,11 @@ function isFuzzyMatch(word, keywords, threshold = 2) {
 export function correctHebrewOCRErrors(text) {
   if (!text) return ''
   
-  let correctedText = text
+  // DISABLED: The global character replacement is corrupting valid Hebrew text
+  // Instead, return the normalized text as-is since Google Vision OCR is already quite accurate
+  // TODO: Implement context-aware corrections that only fix actual OCR errors
   
-  // Apply character-level corrections
-  for (const [correct, confusions] of Object.entries(HEBREW_OCR_CORRECTIONS)) {
-    for (const confused of confusions) {
-      // Replace confused characters in context
-      correctedText = correctedText.replace(new RegExp(confused, 'g'), correct)
-    }
-  }
-  
-  return correctedText
+  return text
 }
 
 /**

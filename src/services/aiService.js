@@ -1,6 +1,7 @@
 // AI Service - Enhanced with real OpenAI integration for appeal analysis
 import OpenAI from 'openai'
 import dotenv from 'dotenv'
+import { searchSimilarLegalCases } from './semanticSearchService.js'
 
 dotenv.config()
 
@@ -31,7 +32,11 @@ export const analyzeTrafficViolation = async (ocrResults) => {
 
 // Enhanced AI analysis using OpenAI
 async function performEnhancedAnalysis(extractedFields, confidenceScores, validation) {
-  const analysisPrompt = createAnalysisPrompt(extractedFields, confidenceScores, validation)
+  // Step 1: Search for similar legal cases/precedents
+  const legalSearchResult = await searchSimilarLegalCases(extractedFields)
+  
+  // Step 2: Create enhanced analysis prompt with legal context
+  const analysisPrompt = createAnalysisPrompt(extractedFields, confidenceScores, validation, legalSearchResult)
   
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -154,7 +159,9 @@ export const assessAppealProbability = (technicalIssues, legalAnalysis) => {
 }
 
 // Create analysis prompt for OpenAI
-function createAnalysisPrompt(extractedFields, confidenceScores, validation) {
+function createAnalysisPrompt(extractedFields, confidenceScores, validation, legalSearchResult) {
+  const legalContext = legalSearchResult?.legalContext || 'אין מידע משפטי רלוונטי זמין.'
+  
   return `נתח את דוח התנועה הבא והמלץ האם כדאי להגיש ערעור:
 
 פרטי הדוח:
@@ -172,6 +179,9 @@ ${Object.entries(confidenceScores).map(([field, score]) =>
 ).join('\n')}
 
 תקפות הנתונים: ${validation.completeness.toFixed(1)}% שלמות
+
+מידע משפטי רלוונטי מבסיס הידע:
+${legalContext}
 
 החזר ניתוח בפורמט JSON הבא:
 {
