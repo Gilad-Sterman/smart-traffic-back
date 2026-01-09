@@ -12,7 +12,7 @@ const openai = new OpenAI({
 
 export const analyzeTrafficViolation = async (ocrResults) => {
   const { extractedFields, confidenceScores, validation } = ocrResults
-  
+
   // Check if we have sufficient data for analysis
   if (!validation.isValid && validation.completeness < 60) {
     console.warn('⚠️ Insufficient data for AI analysis, using fallback')
@@ -34,10 +34,18 @@ export const analyzeTrafficViolation = async (ocrResults) => {
 async function performEnhancedAnalysis(extractedFields, confidenceScores, validation) {
   // Step 1: Search for similar legal cases/precedents
   const legalSearchResult = await searchSimilarLegalCases(extractedFields)
-  
+
+  console.log('🔍 Legal chunks summary:', legalSearchResult.chunks.map(chunk => ({
+    title: chunk.title,
+    category: chunk.category,
+    contentLength: chunk.content?.length || 0
+  })))
   // Step 2: Create enhanced analysis prompt with legal context
   const analysisPrompt = createAnalysisPrompt(extractedFields, confidenceScores, validation, legalSearchResult)
-  
+
+  console.log('🔍 AI Analysis Debug - Sending prompt to OpenAI:')
+  console.log('  - Legal context chunks:', legalSearchResult?.chunks?.length || 0)
+
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
@@ -64,7 +72,8 @@ async function performEnhancedAnalysis(extractedFields, confidenceScores, valida
   })
 
   const aiResponse = JSON.parse(completion.choices[0].message.content)
-  
+
+
   // Process and validate AI response
   return processAIAnalysisResponse(aiResponse, extractedFields, completion.usage)
 }
@@ -80,7 +89,7 @@ function createFallbackAnalysis(extractedFields, confidenceScores) {
       points: parseInt(extractedFields.points) || estimatePoints(extractedFields),
       fineAmount: parseInt(extractedFields.fineAmount) || 0
     },
-    
+
     // Technical Issues Found
     technicalIssues: [
       {
@@ -96,7 +105,7 @@ function createFallbackAnalysis(extractedFields, confidenceScores) {
         impact: 'עלול לפסול את המדידה'
       }
     ],
-    
+
     // Appeal Assessment
     appealAssessment: {
       recommendation: 'appeal', // 'appeal' | 'pay' | 'uncertain'
@@ -106,7 +115,7 @@ function createFallbackAnalysis(extractedFields, confidenceScores) {
       estimatedCost: 500,
       estimatedTime: '2-4 חודשים'
     },
-    
+
     // Detailed Breakdown
     detailedAnalysis: {
       strengths: [
@@ -124,7 +133,7 @@ function createFallbackAnalysis(extractedFields, confidenceScores) {
         'אסוף עדויות על תנאי הדרך באותו יום'
       ]
     },
-    
+
     // Processing Metadata
     processingInfo: {
       aiModel: 'SmartTraffic Legal AI v1.0',
@@ -133,7 +142,7 @@ function createFallbackAnalysis(extractedFields, confidenceScores) {
       processedAt: new Date().toISOString()
     }
   }
-  
+
   console.log('✅ AI analysis complete')
   return analysisResults
 }
@@ -142,7 +151,7 @@ function createFallbackAnalysis(extractedFields, confidenceScores) {
 const calculateSeverity = (fields) => {
   const speedDiff = parseInt(fields.measuredSpeed) - parseInt(fields.speedLimit)
   const points = parseInt(fields.points) || 0
-  
+
   if (speedDiff > 30 || points >= 8) return 'high'
   if (speedDiff > 15 || points >= 4) return 'medium'
   return 'low'
@@ -152,7 +161,7 @@ const calculateSeverity = (fields) => {
 export const assessAppealProbability = (technicalIssues, legalAnalysis) => {
   const highSeverityIssues = technicalIssues.filter(issue => issue.severity === 'high').length
   const mediumSeverityIssues = technicalIssues.filter(issue => issue.severity === 'medium').length
-  
+
   if (highSeverityIssues >= 2) return 'high'
   if (highSeverityIssues >= 1 || mediumSeverityIssues >= 3) return 'medium'
   return 'low'
@@ -161,7 +170,7 @@ export const assessAppealProbability = (technicalIssues, legalAnalysis) => {
 // Create analysis prompt for OpenAI
 function createAnalysisPrompt(extractedFields, confidenceScores, validation, legalSearchResult) {
   const legalContext = legalSearchResult?.legalContext || 'אין מידע משפטי רלוונטי זמין.'
-  
+
   return `נתח את דוח התנועה הבא והמלץ האם כדאי להגיש ערעור:
 
 פרטי הדוח:
@@ -171,12 +180,17 @@ function createAnalysisPrompt(extractedFields, confidenceScores, validation, leg
 - סכום קנס: ${extractedFields.fineAmount || 'לא זוהה'} ש"ח
 - נקודות: ${extractedFields.points || 'לא זוהה'}
 - מיקום: ${extractedFields.location || 'לא זוהה'}
-- שעה: ${extractedFields.violationTime || 'לא זוהה'}
+- שעה: ${extractedFields.violationTime || 'לא זוהה'}${extractedFields.vehiclePlate && confidenceScores.vehiclePlate > 0 ? `
+- מספר רכב: ${extractedFields.vehiclePlate}` : ''}${extractedFields.driverName && confidenceScores.driverName > 0 ? `
+- שם נהג: ${extractedFields.driverName}` : ''}${extractedFields.licenseNumber && confidenceScores.licenseNumber > 0 ? `
+- רישיון נהיגה: ${extractedFields.licenseNumber}` : ''}
+
+הערה חשובה: רק שדות שזוהו בהצלחה מוצגים לעיל. שדות שלא זוהו עשויים להיות קיימים בדוח המקורי אך לא חולצו בהצלחה על ידי המערכת.
 
 רמות ביטחון בחילוץ:
-${Object.entries(confidenceScores).map(([field, score]) => 
-  `- ${field}: ${(score * 100).toFixed(1)}%`
-).join('\n')}
+${Object.entries(confidenceScores).map(([field, score]) =>
+    `- ${field}: ${(score * 100).toFixed(1)}%`
+  ).join('\n')}
 
 תקפות הנתונים: ${validation.completeness.toFixed(1)}% שלמות
 
@@ -227,10 +241,10 @@ function processAIAnalysisResponse(aiResponse, extractedFields, usage) {
       points: parseInt(extractedFields.points) || 0,
       fineAmount: parseInt(extractedFields.fineAmount) || 0
     },
-    
+
     // Technical Issues Found
     technicalIssues: aiResponse.technicalIssues || [],
-    
+
     // Appeal Assessment
     appealAssessment: aiResponse.appealAssessment || {
       recommendation: 'uncertain',
@@ -240,14 +254,14 @@ function processAIAnalysisResponse(aiResponse, extractedFields, usage) {
       estimatedCost: 500,
       estimatedTime: '2-4 חודשים'
     },
-    
+
     // Detailed Breakdown
     detailedAnalysis: aiResponse.detailedAnalysis || {
       strengths: ['דוח קריא ומובן'],
       weaknesses: ['חסרים פרטים'],
       recommendations: ['התייעץ עם עורך דין']
     },
-    
+
     // Processing Metadata
     processingInfo: {
       aiModel: 'GPT-4o-mini',
@@ -264,7 +278,7 @@ function processAIAnalysisResponse(aiResponse, extractedFields, usage) {
 function estimatePoints(extractedFields) {
   const fineAmount = parseInt(extractedFields.fineAmount) || 0
   const violationType = extractedFields.violationType || ''
-  
+
   // Basic estimation based on fine amount and violation type
   if (fineAmount >= 1500 || violationType.includes('מהירות')) return 6
   if (fineAmount >= 1000) return 4
@@ -275,7 +289,7 @@ function estimatePoints(extractedFields) {
 // Helper function to generate legal recommendations
 export const generateLegalRecommendations = (analysisResults) => {
   const recommendations = []
-  
+
   analysisResults.technicalIssues.forEach(issue => {
     switch (issue.type) {
       case 'missing_calibration':
@@ -288,6 +302,6 @@ export const generateLegalRecommendations = (analysisResults) => {
         recommendations.push('בדוק את הנושא עם עורך דין מתמחה')
     }
   })
-  
+
   return recommendations
 }

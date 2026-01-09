@@ -133,7 +133,6 @@ export const analyzeDocument = async (req, res) => {
       
       // Use user-corrected fields if provided, otherwise use original OCR results
       if (correctedFields) {
-        console.log('📝 AI analysis using user-corrected fields')
         analysisData.extractedFields = { 
           ...analysisData.extractedFields, 
           ...correctedFields 
@@ -145,6 +144,7 @@ export const analyzeDocument = async (req, res) => {
             analysisData.confidenceScores[fieldName] = 0.95 // High confidence for user-corrected data
           }
         })
+        
         
         // Update validation completeness
         if (analysisData.validation) {

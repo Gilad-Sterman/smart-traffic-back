@@ -67,6 +67,11 @@ const FIELD_DEFINITIONS = {
       description: "מספר רכב",
       examples: ["123-45-678", "987-65-432"],
       validation: "license plate format"
+    },
+    appealDeadline: {
+      description: "מועד אחרון לערעור בפורמט DD/MM/YYYY",
+      examples: ["15/03/2024", "30/12/2023", "07/08/2024"],
+      validation: "valid date format"
     }
   }
 }

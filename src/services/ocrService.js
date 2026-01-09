@@ -55,6 +55,7 @@ function parseOCRTextWithConfidence(text, ocrResponse) {
     const line = lines[i]
     const nextLine = lines[i + 1] || ''
     const lineConfidence = getLineConfidence(line)
+    
 
     // Report Number
     if (/מספר דוח|פרטי דוח מספר/i.test(line)) {
@@ -116,12 +117,41 @@ function parseOCRTextWithConfidence(text, ocrResponse) {
       confidences.licenseNumber = lineConfidence
     }
 
+    // Vehicle Plate (if present)
+    if (/לוחית ישראלי|מספר רכב/i.test(line)) {
+      const match = nextLine.match(/(\d{8})/) || line.match(/(\d{8})/)
+      if (match) {
+        fields.vehiclePlate = match[1]
+        confidences.vehiclePlate = lineConfidence
+      }
+    }
+
     // Points (if present)
     if (/נקודות/i.test(line)) {
       const match = line.match(/(\d+)/)
       if (match) {
         fields.points = match[1]
         confidences.points = lineConfidence
+      }
+    }
+
+    // Appeal Deadline (if present)
+    if (/מועד אחרון לערעור|מועד ערעור|תאריך ערעור|ערעור עד|מועד אחרון לתשלום/i.test(line)) {
+      // Check current line and up to 5 lines ahead for date pattern
+      const line2 = lines[i + 2] || ''
+      const line3 = lines[i + 3] || ''
+      const line4 = lines[i + 4] || ''
+      const line5 = lines[i + 5] || ''
+      const match = line.match(/(\d{2}\/\d{2}\/\d{4})/) || 
+                   nextLine.match(/(\d{2}\/\d{2}\/\d{4})/) ||
+                   line2.match(/(\d{2}\/\d{2}\/\d{4})/) ||
+                   line3.match(/(\d{2}\/\d{2}\/\d{4})/) ||
+                   line4.match(/(\d{2}\/\d{2}\/\d{4})/) ||
+                   line5.match(/(\d{2}\/\d{2}\/\d{4})/)
+      if (match) {
+        fields.appealDeadline = match[1]
+        confidences.appealDeadline = lineConfidence
+      } else {
       }
     }
   }
@@ -144,6 +174,7 @@ export async function extractTextFromDocument(fileInfo) {
       throw new Error('No text detected in document')
     }
 
+
     // Calculate overall OCR confidence from Vision API
     const ocrConfidence = calculateVisionConfidence(result)
 
@@ -157,6 +188,8 @@ export async function extractTextFromDocument(fileInfo) {
       console.warn('⚠️ AI extraction failed, falling back to legacy parsing')
       // Fallback to legacy parsing
       const { extractedFields, confidenceScores } = parseOCRTextWithConfidence(rawText, result)
+      console.log('🔍 OCR Debug - Legacy extraction fields:', extractedFields)
+      console.log('🔍 OCR Debug - Legacy confidence scores:', confidenceScores)
       return createLegacyResult(rawText, extractedFields, confidenceScores, fileInfo)
     }
 
@@ -166,14 +199,36 @@ export async function extractTextFromDocument(fileInfo) {
     const processingTime = Date.now() - startTime
     console.log(`✅ Enhanced OCR complete: ${processingTime}ms, confidence: ${(ocrConfidence * 100).toFixed(1)}%, fields: ${Object.keys(aiExtractionResult.extractedFields).length}`)
 
+    // Check if AI missed any critical fields that legacy might catch
+    const missingFields = ['points', 'appealDeadline', 'vehiclePlate'].filter(field => 
+      !aiExtractionResult.extractedFields[field] || aiExtractionResult.extractedFields[field] === null
+    )
+    
+    let finalFields = aiExtractionResult.extractedFields
+    let finalConfidences = aiExtractionResult.confidenceScores
+    
+    // Only run legacy extraction if AI missed important fields
+    if (missingFields.length > 0) {
+      const legacyResult = parseOCRTextWithConfidence(rawText, result)
+      
+      // Fill in only the missing fields from legacy extraction
+      missingFields.forEach(field => {
+        if (legacyResult.extractedFields[field]) {
+          finalFields = { ...finalFields, [field]: legacyResult.extractedFields[field] }
+          finalConfidences = { ...finalConfidences, [field]: legacyResult.confidenceScores[field] || 0 }
+        }
+      })
+    }
+
     // Return enhanced OCR results
+    
     return {
       // Original data
       extractedText: rawText,
       
       // Enhanced extraction results
-      extractedFields: aiExtractionResult.extractedFields,
-      confidenceScores: aiExtractionResult.confidenceScores,
+      extractedFields: finalFields,
+      confidenceScores: finalConfidences,
       
       // Processing pipeline results
       preprocessing: {
